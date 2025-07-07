@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 from datetime import datetime, time as dt_time
@@ -10,10 +10,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException
+import json
+import os
 
 # --- Variables Globales ---
 automation_running = False
 driver = None
+# Define the directory for configurations, relative to the script's location
+CONFIG_DIR = "configs"
 
 def start_automation_thread(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars):
     """
@@ -71,6 +75,11 @@ def login(target_url, username, password):
     """
     global driver
     try:
+        # Check if driver is already initialized, if not, initialize it
+        if driver is None:
+            service = ChromeService(executable_path=ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service)
+
         login_url = "https://centrovirtual.grupo2000.es/login/index.php"
         driver.get(login_url)
         time.sleep(2) # Espera a que la página cargue
@@ -111,16 +120,22 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
     global automation_running, driver
 
     try:
-        # Configuración de Selenium
-        service = ChromeService(executable_path=ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service)
+        # Configuración de Selenium (ya inicializado en login, pero si se llama directamente, aquí lo haríamos)
+        if driver is None:
+            service = ChromeService(executable_path=ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service)
+
         screen_width, screen_height = pyautogui.size()
 
-        # 1. Realizar el login
-        if not login(url, username, password):
-            automation_running = False
-            messagebox.showinfo("Información", "La automatización se ha detenido debido a un fallo en el login.")
-            return
+        # 1. Realizar el login (solo si no estamos ya logeados o el driver es nuevo)
+        # Assuming login is handled by `start_automation_thread` calling `login` first
+        # If the driver is already set from a previous successful login, we don't need to re-login
+        if not driver.current_url.startswith("https://centrovirtual.grupo2000.es/"): # Basic check if we are still in the platform
+             if not login(url, username, password):
+                automation_running = False
+                messagebox.showinfo("Información", "La automatización se ha detenido debido a un fallo en el login.")
+                return
+
 
         # 2. Bucle principal de automatización
         while automation_running:
@@ -172,6 +187,96 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
         automation_running = False
         print("El navegador se ha cerrado y la automatización ha finalizado.")
 
+# --- Funciones de Guardar/Cargar Configuración ---
+
+def save_config(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars):
+    """
+    Guarda la configuración actual de la GUI en un archivo JSON.
+    """
+    # Ensure the config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+
+    config_data = {
+        "url": url_entry.get(),
+        "username": user_entry.get(),
+        "password": pass_entry.get(),
+        "start_time": start_time_entry.get(),
+        "end_time": end_time_entry.get(),
+        "selected_days": [day for day, var in days_vars.items() if var.get() == 1]
+    }
+
+    if not all(config_data.values()):
+        messagebox.showwarning("Advertencia", "Algunos campos están vacíos. Guardando solo los valores presentes.")
+
+    file_path = filedialog.asksaveasfilename(
+        initialdir=CONFIG_DIR,
+        defaultextension=".json",
+        filetypes=[("Archivos JSON", "*.json"), ("Todos los archivos", "*.*")],
+        title="Guardar Configuración como"
+    )
+    
+    if file_path:
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(config_data, f, indent=4)
+            messagebox.showinfo("Información", f"Configuración guardada en {os.path.basename(file_path)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar la configuración: {e}")
+
+def load_config_from_file(file_path, url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars):
+    """
+    Carga la configuración desde un archivo JSON y actualiza la GUI.
+    """
+    try:
+        with open(file_path, 'r') as f:
+            config_data = json.load(f)
+        apply_config(config_data, url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars)
+        messagebox.showinfo("Información", f"Configuración '{os.path.basename(file_path)}' cargada correctamente.")
+    except FileNotFoundError:
+        messagebox.showerror("Error", "Archivo de configuración no encontrado.")
+    except json.JSONDecodeError:
+        messagebox.showerror("Error", "Error al leer el archivo JSON. Asegúrese de que sea un archivo JSON válido.")
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo cargar la configuración: {e}")
+
+def load_config(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars):
+    """
+    Permite al usuario seleccionar un archivo de configuración JSON para cargar.
+    """
+    file_path = filedialog.askopenfilename(
+        initialdir=CONFIG_DIR,
+        filetypes=[("Archivos JSON", "*.json"), ("Todos los archivos", "*.*")],
+        title="Seleccionar Archivo de Configuración"
+    )
+    if file_path:
+        load_config_from_file(file_path, url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars)
+
+def apply_config(config_data, url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars):
+    """
+    Aplica la configuración cargada a los campos de la GUI.
+    """
+    url_entry.delete(0, tk.END)
+    url_entry.insert(0, config_data.get("url", ""))
+
+    user_entry.delete(0, tk.END)
+    user_entry.insert(0, config_data.get("username", ""))
+
+    pass_entry.delete(0, tk.END)
+    pass_entry.insert(0, config_data.get("password", ""))
+
+    start_time_entry.delete(0, tk.END)
+    start_time_entry.insert(0, config_data.get("start_time", ""))
+
+    end_time_entry.delete(0, tk.END)
+    end_time_entry.insert(0, config_data.get("end_time", ""))
+
+    # Reset all checkboxes first
+    for var in days_vars.values():
+        var.set(0)
+    # Set selected checkboxes
+    for day in config_data.get("selected_days", []):
+        if day in days_vars:
+            days_vars[day].set(1)
 
 def create_gui():
     """
@@ -179,7 +284,7 @@ def create_gui():
     """
     root = tk.Tk()
     root.title("Automatización Web con Selenium")
-    root.geometry("450x450")
+    root.geometry("450x550") # Aumentado el tamaño para los nuevos botones
 
     frame = ttk.Frame(root, padding="10")
     frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -232,9 +337,37 @@ def create_gui():
     stop_button = ttk.Button(button_frame, text="Detener Automatización", command=stop_automation)
     stop_button.pack(side=tk.LEFT, padx=10)
 
+    # --- Botones de Configuración (Guardar/Cargar) ---
+    config_button_frame = ttk.Frame(frame)
+    config_button_frame.grid(column=0, row=6, columnspan=2, pady=10)
+
+    save_button = ttk.Button(config_button_frame, text="Guardar Configuración", 
+                             command=lambda: save_config(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars))
+    save_button.pack(side=tk.LEFT, padx=10)
+
+    load_button = ttk.Button(config_button_frame, text="Cargar Configuración", 
+                             command=lambda: load_config(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars))
+    load_button.pack(side=tk.LEFT, padx=10)
+
     # --- Configurar expansión de columnas ---
     frame.columnconfigure(1, weight=1)
     
+    # --- Cargar automáticamente la última configuración si existe o mostrar selector ---
+    def on_app_start():
+        if not os.path.exists(CONFIG_DIR) or not os.listdir(CONFIG_DIR):
+            messagebox.showinfo("Bienvenido", "No se encontraron configuraciones guardadas. Por favor, introduce los datos o guarda una nueva configuración.")
+            return
+
+        # Offer the user to load a config
+        response = messagebox.askyesno(
+            "Cargar Configuración", 
+            "¿Deseas cargar una configuración guardada al inicio?"
+        )
+        if response:
+            load_config(url_entry, user_entry, pass_entry, start_time_entry, end_time_entry, days_vars)
+        
+    root.after(100, on_app_start) # Call after the GUI is fully drawn
+
     root.mainloop()
 
 if __name__ == "__main__":
