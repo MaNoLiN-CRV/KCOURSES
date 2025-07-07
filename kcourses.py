@@ -120,70 +120,65 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
     global automation_running, driver
 
     try:
-        # Configuración de Selenium (ya inicializado en login, pero si se llama directamente, aquí lo haríamos)
-        if driver is None:
-            service = ChromeService(executable_path=ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service)
-
         screen_width, screen_height = pyautogui.size()
 
-        # 1. Realizar el login (solo si no estamos ya logeados o el driver es nuevo)
-        # Assuming login is handled by `start_automation_thread` calling `login` first
-        # If the driver is already set from a previous successful login, we don't need to re-login
-        if not driver.current_url.startswith("https://centrovirtual.grupo2000.es/"): # Basic check if we are still in the platform
-             if not login(url, username, password):
-                automation_running = False
-                messagebox.showinfo("Información", "La automatización se ha detenido debido a un fallo en el login.")
-                return
-
-
-        # 2. Bucle principal de automatización
         while automation_running:
             now = datetime.now()
             current_time = now.time()
-            # Días de la semana: Lunes (0) a Domingo (6)
             current_weekday = now.weekday()
             day_map = {"L": 0, "M": 1, "X": 2, "J": 3, "V": 4, "S": 5, "D": 6}
-            
+
             # Comprobar si estamos en el horario y día correctos
             is_scheduled_day = any(current_weekday == day_map[day] for day in selected_days)
             is_in_time_range = start_time <= current_time <= end_time
 
             if is_scheduled_day and is_in_time_range:
+                # Abrir el navegador si no está abierto
+                if driver is None:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Iniciando navegador...")
+                    service = ChromeService(executable_path=ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service)
+                    driver.get(url)
+                    time.sleep(5)  # Esperar a que la página cargue
+
                 # --- ACCIONES PROGRAMADAS ---
-                
-                # Refrescar página
                 print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Refrescando la página...")
                 driver.refresh()
-                time.sleep(5) # Espera a que recargue
+                time.sleep(5)  # Espera a que recargue
 
                 # Mover el cursor aleatoriamente
                 rand_x = random.randint(0, screen_width - 1)
                 rand_y = random.randint(0, screen_height - 1)
                 pyautogui.moveTo(rand_x, rand_y, duration=0.5)
                 print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Cursor movido a ({rand_x}, {rand_y}).")
-                
-                # Esperar 5 minutos
+
+                # Esperar 5 minutos antes del próximo ciclo
                 print("Esperando 5 minutos para el próximo ciclo...")
-                
-                # Bucle de espera que verifica si la automatización debe detenerse
-                for _ in range(300): # 300 segundos = 5 minutos
+                for _ in range(300):  # 300 segundos = 5 minutos
                     if not automation_running:
                         break
                     time.sleep(1)
             else:
-                # Fuera de horario, esperar un poco antes de volver a comprobar
+                # Cerrar el navegador si está fuera del horario
+                if driver is not None:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fuera de horario. Cerrando navegador...")
+                    driver.quit()
+                    driver = None
+
+                # Esperar 1 minuto antes de volver a comprobar
                 print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fuera de horario. Esperando para re-evaluar...")
-                for _ in range(60): # Esperar 1 minuto
+                for _ in range(60):  # Esperar 1 minuto
                     if not automation_running:
                         break
                     time.sleep(1)
-        
+
     except Exception as e:
         messagebox.showerror("Error en Automatización", f"Ha ocurrido un error: {e}")
     finally:
+        # Asegurarse de cerrar el navegador al finalizar
         if driver:
             driver.quit()
+        driver = None
         automation_running = False
         print("El navegador se ha cerrado y la automatización ha finalizado.")
 
