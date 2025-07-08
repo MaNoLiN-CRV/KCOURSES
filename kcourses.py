@@ -75,14 +75,19 @@ def login(target_url, username, password):
     """
     global driver
     try:
-        # Check if driver is already initialized, if not, initialize it
+        # Inicializar el navegador si no está inicializado
         if driver is None:
             service = ChromeService(executable_path=ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service)
 
         login_url = "https://centrovirtual.grupo2000.es/login/index.php"
         driver.get(login_url)
-        time.sleep(2) # Espera a que la página cargue
+        time.sleep(2)  # Espera a que la página cargue
+
+        # Verificar si la página cargó correctamente
+        if "login" not in driver.current_url:
+            messagebox.showerror("Error de Automatización", "No se pudo acceder a la página de login. Verifique la URL.")
+            return False
 
         # Encontrar el token de login
         try:
@@ -92,14 +97,22 @@ def login(target_url, username, password):
             return False
 
         # Rellenar formulario
-        driver.find_element(By.ID, "username").send_keys(username)
-        driver.find_element(By.ID, "password").send_keys(password)
+        try:
+            driver.find_element(By.ID, "username").send_keys(username)
+            driver.find_element(By.ID, "password").send_keys(password)
+        except NoSuchElementException:
+            messagebox.showerror("Error de Automatización", "No se pudieron encontrar los campos de usuario o contraseña. La estructura de la web puede haber cambiado.")
+            return False
 
         # Enviar formulario
-        driver.find_element(By.ID, "loginbtn").click()
-        time.sleep(5) # Esperar a la redirección post-login
+        try:
+            driver.find_element(By.ID, "loginbtn").click()
+            time.sleep(5)  # Esperar a la redirección post-login
+        except NoSuchElementException:
+            messagebox.showerror("Error de Automatización", "No se pudo encontrar el botón de login. La estructura de la web puede haber cambiado.")
+            return False
 
-        # Verificar si el login fue exitoso (comprobando si seguimos en la página de login)
+        # Verificar si el login fue exitoso
         if "login/index.php" in driver.current_url:
             messagebox.showerror("Error de Login", "Credenciales incorrectas o error en el inicio de sesión.")
             return False
@@ -138,8 +151,11 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
                     print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Iniciando navegador...")
                     service = ChromeService(executable_path=ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service)
-                    driver.get(url)
-                    time.sleep(5)  # Esperar a que la página cargue
+                    # Hacer login tras abrir el navegador
+                    if not login(url, username, password):
+                        automation_running = False
+                        return
+                    time.sleep(2)  # Esperar a que la página cargue tras login
 
                 # --- ACCIONES PROGRAMADAS ---
                 print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Refrescando la página...")
