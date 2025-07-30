@@ -8,8 +8,10 @@ import pyautogui
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import json
 import os
 
@@ -81,47 +83,101 @@ def login(target_url, username, password):
             driver = webdriver.Chrome(service=service)
 
         login_url = "https://centrovirtual.grupo2000.es/login/index.php"
+        print(f"Navegando a: {login_url}")
         driver.get(login_url)
-        time.sleep(2)  # Espera a que la página cargue
+        
+        # Usar WebDriverWait para esperar a que la página cargue
+        wait = WebDriverWait(driver, 10)
 
         # Verificar si la página cargó correctamente
-        if "login" not in driver.current_url:
-            messagebox.showerror("Error de Automatización", "No se pudo acceder a la página de login. Verifique la URL.")
+        current_url = driver.current_url
+        print(f"URL actual después de cargar: {current_url}")
+        
+        if "login" not in current_url:
+            messagebox.showerror("Error de Automatización", f"No se pudo acceder a la página de login. URL actual: {current_url}")
             return False
 
-        # Encontrar el token de login
+        # Esperar y encontrar el token de login
         try:
-            logintoken = driver.find_element(By.NAME, "logintoken").get_attribute("value")
+            logintoken_element = wait.until(EC.presence_of_element_located((By.NAME, "logintoken")))
+            logintoken = logintoken_element.get_attribute("value")
+            print(f"Token de login encontrado: {logintoken}")
+        except TimeoutException:
+            print("Timeout esperando el campo logintoken")
+            messagebox.showerror("Error de Automatización", "Timeout esperando el campo logintoken. La página puede estar cargando lentamente.")
+            return False
         except NoSuchElementException:
+            print("No se pudo encontrar el campo logintoken")
             messagebox.showerror("Error de Automatización", "No se pudo encontrar el campo 'logintoken'. La estructura de la web puede haber cambiado.")
             return False
 
-        # Rellenar formulario
+        # Esperar y rellenar formulario
         try:
-            driver.find_element(By.ID, "username").send_keys(username)
-            driver.find_element(By.ID, "password").send_keys(password)
-        except NoSuchElementException:
+            # Esperar y limpiar/rellenar el campo de usuario
+            username_field = wait.until(EC.element_to_be_clickable((By.ID, "username")))
+            username_field.clear()
+            username_field.send_keys(username)
+            print(f"Usuario ingresado: {username}")
+
+            # Esperar y limpiar/rellenar el campo de contraseña
+            password_field = wait.until(EC.element_to_be_clickable((By.ID, "password")))
+            password_field.clear()
+            password_field.send_keys(password)
+            print("Contraseña ingresada")
+
+        except TimeoutException:
+            print("Timeout esperando los campos de usuario/contraseña")
+            messagebox.showerror("Error de Automatización", "Timeout esperando los campos de usuario/contraseña.")
+            return False
+        except NoSuchElementException as e:
+            print(f"Error al encontrar campos de login: {e}")
             messagebox.showerror("Error de Automatización", "No se pudieron encontrar los campos de usuario o contraseña. La estructura de la web puede haber cambiado.")
             return False
 
         # Enviar formulario
         try:
-            driver.find_element(By.ID, "loginbtn").click()
-            time.sleep(5)  # Esperar a la redirección post-login
+            login_button = wait.until(EC.element_to_be_clickable((By.ID, "loginbtn")))
+            print("Haciendo click en el botón de login...")
+            login_button.click()
+            
+            # Esperar a que la URL cambie (indicando redirección)
+            wait.until(lambda driver: "login/index.php" not in driver.current_url or driver.current_url != login_url)
+            time.sleep(3)  # Tiempo adicional para asegurar que la página cargue completamente
+            
+        except TimeoutException:
+            print("Timeout esperando el botón de login o redirección")
+            messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login.")
+            return False
         except NoSuchElementException:
+            print("No se pudo encontrar el botón de login")
             messagebox.showerror("Error de Automatización", "No se pudo encontrar el botón de login. La estructura de la web puede haber cambiado.")
             return False
 
         # Verificar si el login fue exitoso
-        if "login/index.php" in driver.current_url:
-            messagebox.showerror("Error de Login", "Credenciales incorrectas o error en el inicio de sesión.")
+        current_url_after_login = driver.current_url
+        print(f"URL después del login: {current_url_after_login}")
+        
+        if "login/index.php" in current_url_after_login:
+            print("Login falló - aún en página de login")
+            # Intentar obtener mensaje de error si existe
+            try:
+                error_element = driver.find_element(By.CSS_SELECTOR, ".alert-danger, .error, .loginerrors")
+                error_message = error_element.text
+                print(f"Mensaje de error en la página: {error_message}")
+                messagebox.showerror("Error de Login", f"Credenciales incorrectas o error en el inicio de sesión. Mensaje: {error_message}")
+            except NoSuchElementException:
+                messagebox.showerror("Error de Login", "Credenciales incorrectas o error en el inicio de sesión.")
             return False
 
+        print("Login exitoso")
         # Navegar a la URL final deseada
+        print(f"Navegando a la URL objetivo: {target_url}")
         driver.get(target_url)
+        time.sleep(3)  # Esperar a que cargue la página objetivo
         return True
 
     except Exception as e:
+        print(f"Error crítico en login: {e}")
         messagebox.showerror("Error Crítico en Login", f"Ha ocurrido un error inesperado durante el login: {e}")
         return False
 
@@ -152,15 +208,49 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
                     service = ChromeService(executable_path=ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service)
                     # Hacer login tras abrir el navegador
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Intentando hacer login...")
                     if not login(url, username, password):
+                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Login falló. Deteniendo automatización.")
                         automation_running = False
+                        if driver:
+                            driver.quit()
+                            driver = None
                         return
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Login exitoso.")
                     time.sleep(2)  # Esperar a que la página cargue tras login
 
+                # Verificar que el driver sigue activo
+                try:
+                    current_url = driver.current_url
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] URL actual: {current_url}")
+                except Exception as e:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Error al verificar URL: {e}")
+                    # Reiniciar el navegador si hay problemas
+                    if driver:
+                        driver.quit()
+                    driver = None
+                    continue
+
                 # --- ACCIONES PROGRAMADAS ---
-                print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Refrescando la página...")
-                driver.refresh()
-                time.sleep(5)  # Espera a que recargue
+                try:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Refrescando la página...")
+                    driver.refresh()
+                    time.sleep(5)  # Espera a que recargue
+                    
+                    # Verificar que la página se cargó correctamente
+                    if "login" in driver.current_url:
+                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Sesión expiró. Necesita hacer login nuevamente.")
+                        # Reintentar login
+                        if not login(url, username, password):
+                            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Re-login falló. Deteniendo automatización.")
+                            automation_running = False
+                            if driver:
+                                driver.quit()
+                                driver = None
+                            return
+                except Exception as e:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Error al refrescar página: {e}")
+                    continue
 
                 # Mover el cursor aleatoriamente
                 rand_x = random.randint(0, screen_width - 1)
