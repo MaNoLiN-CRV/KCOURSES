@@ -7,6 +7,7 @@ import random
 import pyautogui
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -147,15 +148,67 @@ def login(target_url, username, password):
 
         # Enviar formulario
         try:
+            # Esperar a que jQuery se cargue si es necesario
+            try:
+                driver.execute_script("return typeof jQuery !== 'undefined';")
+                print("jQuery disponible")
+            except:
+                print("jQuery no disponible, usando métodos alternativos")
+            
             login_button = wait.until(EC.element_to_be_clickable((By.ID, "loginbtn")))
             print("Haciendo click en el botón de login...")
             
-            # Hacer click usando JavaScript como alternativa más confiable
-            driver.execute_script("arguments[0].click();", login_button)
+            # Intentar múltiples métodos de envío
+            success = False
             
-            # Esperar más tiempo y usar múltiples estrategias para detectar el cambio
-            print("Esperando redirección...")
-            max_wait_time = 30  # 30 segundos máximo
+            # Método 1: Click directo
+            try:
+                login_button.click()
+                print("Click directo realizado")
+                time.sleep(2)
+                if "login/index.php" not in driver.current_url:
+                    success = True
+            except Exception as e:
+                print(f"Click directo falló: {e}")
+            
+            # Método 2: JavaScript click si el método 1 falló
+            if not success:
+                try:
+                    driver.execute_script("arguments[0].click();", login_button)
+                    print("Click por JavaScript realizado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Click por JavaScript falló: {e}")
+            
+            # Método 3: Submit del formulario si los métodos anteriores fallaron
+            if not success:
+                try:
+                    form = driver.find_element(By.CSS_SELECTOR, "form.login-form, #login")
+                    driver.execute_script("arguments[0].submit();", form)
+                    print("Submit de formulario realizado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Submit de formulario falló: {e}")
+            
+            # Método 4: Enviar ENTER en el campo de contraseña
+            if not success:
+                try:
+                    from selenium.webdriver.common.keys import Keys
+                    password_field.send_keys(Keys.RETURN)
+                    print("Enter en campo de contraseña enviado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Enter en campo de contraseña falló: {e}")
+            
+            # Esperar y monitorear la redirección
+            print("Monitoreando redirección...")
+            max_wait_time = 20  # 20 segundos máximo
             start_time = time.time()
             
             while time.time() - start_time < max_wait_time:
@@ -184,19 +237,8 @@ def login(target_url, username, password):
             # Verificar si salimos del bucle por timeout
             if time.time() - start_time >= max_wait_time:
                 print("Timeout esperando redirección después del login")
-                # Intentar una vez más manualmente hacer submit del formulario
-                try:
-                    form = driver.find_element(By.ID, "login")
-                    driver.execute_script("arguments[0].submit();", form)
-                    time.sleep(5)
-                    if "login/index.php" not in driver.current_url:
-                        print("Submit manual exitoso")
-                    else:
-                        messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login. El sitio puede estar bloqueando navegadores automatizados.")
-                        return False
-                except:
-                    messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login.")
-                    return False
+                messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login. Verifique las credenciales.")
+                return False
             
         except TimeoutException:
             print("Timeout esperando el botón de login")

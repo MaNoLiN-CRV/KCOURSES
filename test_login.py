@@ -20,9 +20,16 @@ def test_login():
     options.add_experimental_option('useAutomationExtension', False)
     options.add_argument('--disable-web-security')
     options.add_argument('--disable-features=VizDisplayCompositor')
+    options.add_argument('--no-sandbox')  # Agregar para sistemas sin GUI
+    options.add_argument('--disable-dev-shm-usage')  # Para sistemas con poca memoria
     
-    service = ChromeService(executable_path=ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    try:
+        service = ChromeService(executable_path=ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+    except Exception as e:
+        print(f"ERROR: No se pudo inicializar Chrome: {e}")
+        print("Asegúrese de que Google Chrome esté instalado en el sistema")
+        return False
     
     # Ejecutar script para ocultar webdriver
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -76,12 +83,57 @@ def test_login():
             login_button = wait.until(EC.element_to_be_clickable((By.ID, "loginbtn")))
             print("Haciendo click en el botón de login...")
             
-            # Usar JavaScript para hacer click
-            driver.execute_script("arguments[0].click();", login_button)
+            # Intentar múltiples métodos de envío
+            success = False
+            
+            # Método 1: Click directo
+            try:
+                login_button.click()
+                print("Click directo realizado")
+                time.sleep(2)
+                if "login/index.php" not in driver.current_url:
+                    success = True
+            except Exception as e:
+                print(f"Click directo falló: {e}")
+            
+            # Método 2: JavaScript click si el método 1 falló
+            if not success:
+                try:
+                    driver.execute_script("arguments[0].click();", login_button)
+                    print("Click por JavaScript realizado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Click por JavaScript falló: {e}")
+            
+            # Método 3: Submit del formulario si los métodos anteriores fallaron
+            if not success:
+                try:
+                    form = driver.find_element(By.CSS_SELECTOR, "form.login-form, #login")
+                    driver.execute_script("arguments[0].submit();", form)
+                    print("Submit de formulario realizado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Submit de formulario falló: {e}")
+            
+            # Método 4: Enviar ENTER en el campo de contraseña
+            if not success:
+                try:
+                    from selenium.webdriver.common.keys import Keys
+                    password_field.send_keys(Keys.RETURN)
+                    print("Enter en campo de contraseña enviado")
+                    time.sleep(2)
+                    if "login/index.php" not in driver.current_url:
+                        success = True
+                except Exception as e:
+                    print(f"Enter en campo de contraseña falló: {e}")
             
             # Esperar y monitorear la redirección
             print("Monitoreando redirección...")
-            max_wait_time = 30
+            max_wait_time = 20
             start_time = time.time()
             
             while time.time() - start_time < max_wait_time:
@@ -104,7 +156,7 @@ def test_login():
                 except:
                     pass
                 
-                time.sleep(2)
+                time.sleep(1)
             
             print("TIMEOUT: No se detectó redirección")
             return False
