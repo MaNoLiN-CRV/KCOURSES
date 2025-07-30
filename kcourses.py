@@ -79,8 +79,19 @@ def login(target_url, username, password):
     try:
         # Inicializar el navegador si no está inicializado
         if driver is None:
+            options = webdriver.ChromeOptions()
+            # Agregar opciones para que el navegador sea menos detectable
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument('--disable-web-security')
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            
             service = ChromeService(executable_path=ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service)
+            driver = webdriver.Chrome(service=service, options=options)
+            
+            # Ejecutar script para ocultar webdriver
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         login_url = "https://centrovirtual.grupo2000.es/login/index.php"
         print(f"Navegando a: {login_url}")
@@ -138,15 +149,58 @@ def login(target_url, username, password):
         try:
             login_button = wait.until(EC.element_to_be_clickable((By.ID, "loginbtn")))
             print("Haciendo click en el botón de login...")
-            login_button.click()
             
-            # Esperar a que la URL cambie (indicando redirección)
-            wait.until(lambda driver: "login/index.php" not in driver.current_url or driver.current_url != login_url)
-            time.sleep(3)  # Tiempo adicional para asegurar que la página cargue completamente
+            # Hacer click usando JavaScript como alternativa más confiable
+            driver.execute_script("arguments[0].click();", login_button)
+            
+            # Esperar más tiempo y usar múltiples estrategias para detectar el cambio
+            print("Esperando redirección...")
+            max_wait_time = 30  # 30 segundos máximo
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait_time:
+                current_url = driver.current_url
+                print(f"URL actual: {current_url}")
+                
+                # Si la URL cambió y ya no contiene login/index.php, el login fue exitoso
+                if "login/index.php" not in current_url:
+                    print("Redirección detectada - login exitoso")
+                    break
+                
+                # Si encontramos mensajes de error en la página
+                try:
+                    error_elements = driver.find_elements(By.CSS_SELECTOR, ".alert-danger, .error, .loginerrors, .text-danger")
+                    if error_elements:
+                        error_text = " ".join([elem.text for elem in error_elements if elem.text.strip()])
+                        if error_text:
+                            print(f"Error detectado: {error_text}")
+                            messagebox.showerror("Error de Login", f"Error en el login: {error_text}")
+                            return False
+                except:
+                    pass
+                
+                time.sleep(1)  # Esperar 1 segundo antes de verificar de nuevo
+            
+            # Verificar si salimos del bucle por timeout
+            if time.time() - start_time >= max_wait_time:
+                print("Timeout esperando redirección después del login")
+                # Intentar una vez más manualmente hacer submit del formulario
+                try:
+                    form = driver.find_element(By.ID, "login")
+                    driver.execute_script("arguments[0].submit();", form)
+                    time.sleep(5)
+                    if "login/index.php" not in driver.current_url:
+                        print("Submit manual exitoso")
+                    else:
+                        messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login. El sitio puede estar bloqueando navegadores automatizados.")
+                        return False
+                except:
+                    messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login.")
+                    return False
             
         except TimeoutException:
-            print("Timeout esperando el botón de login o redirección")
-            messagebox.showerror("Error de Automatización", "Timeout durante el proceso de login.")
+            print("Timeout esperando el botón de login")
+            messagebox.showerror("Error de Automatización", "Timeout esperando el botón de login.")
             return False
         except NoSuchElementException:
             print("No se pudo encontrar el botón de login")
@@ -205,8 +259,20 @@ def automation_logic(url, username, password, start_time, end_time, selected_day
                 # Abrir el navegador si no está abierto
                 if driver is None:
                     print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Iniciando navegador...")
+                    options = webdriver.ChromeOptions()
+                    # Agregar opciones para que el navegador sea menos detectable
+                    options.add_argument('--disable-blink-features=AutomationControlled')
+                    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    options.add_experimental_option('useAutomationExtension', False)
+                    options.add_argument('--disable-web-security')
+                    options.add_argument('--disable-features=VizDisplayCompositor')
+                    
                     service = ChromeService(executable_path=ChromeDriverManager().install())
-                    driver = webdriver.Chrome(service=service)
+                    driver = webdriver.Chrome(service=service, options=options)
+                    
+                    # Ejecutar script para ocultar webdriver
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    
                     # Hacer login tras abrir el navegador
                     print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Intentando hacer login...")
                     if not login(url, username, password):
